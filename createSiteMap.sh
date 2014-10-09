@@ -167,6 +167,7 @@ if [ "${baseurl:((${#baseurl}-1))}" == "/" ]; then basehref="${baseurl:0:-1}"; e
 for l in `echo -e "1\n2"`; do
    ((l == 2)) && depth=$tmpdepth
 
+   IFS=$'\n'
    for address in $addresslist; do
       #echo ${address:34:-6} | sed 's/\//\" -> \"/g' | echo "   \""`cat -`\" >> "$gvfile"
 
