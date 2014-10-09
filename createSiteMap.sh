@@ -4,6 +4,7 @@
 
 unset USERNAME PASSWORD arg_rest cookies
 unset wikiname baseurl xmlfile gvfile fdpfile dotfile twopifile depth from to fdpratio color
+unset exclude verbose
 
 #wikiname=""
 #baseurl=""
@@ -14,9 +15,10 @@ unset wikiname baseurl xmlfile gvfile fdpfile dotfile twopifile depth from to fd
 #dotfile="$wikiname""_wiki.dot.svg"
 #twopifile="$wikiname""_wiki.twopi.svg"
 
+#exclude=
 depth=0
-from=
-to=
+#from=
+#to=
 
 fdpratio=0.75
 #fdpratio=0.562
@@ -38,56 +40,28 @@ until test "$((i > -BASH_ARGC))" == "0"; do
 
    if [ "${curr_arg:0:2}" == "--" ]; then
       case "$curr_arg" in
-      ##---------------------wikiname----------------------------------------------##
-      --wikiname)
-         i=$((i - 1))
-         wikiname="${BASH_ARGV[$i]}"
-      ;;
-      ##---------------------depth-------------------------------------------------##
-      --depth)
-         i=$((i - 1))
-         depth="${BASH_ARGV[$i]}"
-      ;;
-      ##---------------------from--------------------------------------------------##
-      --from)
-         i=$((i - 1))
-         from="${BASH_ARGV[$i]}"
-      ;;
-      ##---------------------to----------------------------------------------------##
-      --to)
-         i=$((i - 1))
-         to="${BASH_ARGV[$i]}"
-      ;;
-      ##---------------------fdpratio----------------------------------------------##
-      --fdpratio)
-         i=$((i - 1))
-         fdpratio="${BASH_ARGV[$i]}"
-      ;;
-      ##---------------------update------------------------------------------------##
-      --update)
-         update=true
-      ;;
-      ##---------------------load-cookies------------------------------------------##
-      --load-cookies)
-         i=$((i - 1))
-         cookies="${BASH_ARGV[$i]}"
-      ;;
-      ##---------------------xmlfile-----------------------------------------------##
-      --xmlfile)
-         i=$((i - 1))
-         xmlfile="${BASH_ARGV[$i]}"
-      ;;
-      ##---------------------help--------------------------------------------------##
+      --depth)        i=$((i - 1)); depth="${BASH_ARGV[$i]}" ;;
+      --exclude)      i=$((i - 1)); exclude="${BASH_ARGV[$i]}" ;;
+      --fdpratio)     i=$((i - 1)); fdpratio="${BASH_ARGV[$i]}" ;;
+      --from)         i=$((i - 1)); from="${BASH_ARGV[$i]}" ;;
+      --load-cookies) i=$((i - 1)); cookies="${BASH_ARGV[$i]}" ;;
+      --to)           i=$((i - 1)); to="${BASH_ARGV[$i]}" ;;
+      --update)       update=true ;;
+      --verbose)      verbose=true ;;
+      --wikiname)     i=$((i - 1)); wikiname="${BASH_ARGV[$i]}" ;;
+      --xmlfile)      i=$((i - 1)); xmlfile="${BASH_ARGV[$i]}" ;;
       --help)
-         echo "createSiteMap V0.1.1"
+         echo "CreateSiteMap V0.1.2"
          echo "Create visual (site)maps from MoinMoin-Wiki."
          echo ""
          echo "Options:"
          echo "   --help                 Show this help"
+         echo "   --verbose              Print more info"
          echo "   --update               Update SiteMap-XML-File from Wiki (only public sites)"
          echo "   --load-cookies <file>  Define a Cookies-File to download form Wiki (see wget)"
          echo "   --load-cookies firefox Use Wiki-Login from Firefox"
          echo "   --wikiname <name>      The name of the Wiki"
+         echo "   --exclude <site>,...   Sites to exclude from creation"
          echo "   --depth <number>       Max page-depth"
          echo "   --from <char>          Only sites from this character"
          echo "   --to <char>            Only sites till this character"
@@ -100,12 +74,7 @@ until test "$((i > -BASH_ARGC))" == "0"; do
 #      args="$(echo -"$curr_arg" | awk 'BEGIN{FS=""}{ for (i = 3; i <= NF; ++i) print $i; }')"
 #       for arg in `echo -e "$args"`; do
 #         case "$arg" in
-#         ##------------------System Name-------------------------------------------##
-#         s)
-#            arg_system="true"
-#            i=$((i - 1))
-#            system="${BASH_ARGV[$i]}"
-#         ;;
+#         s) arg_system="true"; i=$((i - 1)); system="${BASH_ARGV[$i]}" ;;
 #         esac
 #      done
    else
@@ -130,8 +99,9 @@ done
 : ${dotfile:="$wikiname""_wiki.dot.svg"}
 : ${twopifile:="$wikiname""_wiki.twopi.svg"}
 
-[[ -n "$from" ]] && from="$(echo $from | tr '[:lower:]' '[:upper:]')" && from="$(printf '%d' "'$from")"
-[[ -n "$to"   ]] && to="$(echo $to | tr '[:lower:]' '[:upper:]')"     && to="$(printf '%d' "'$to")"
+[[ -n "$exclude" ]] && exclude=",$exclude,"
+[[ -n "$from"    ]] && from="$(echo $from | tr '[:lower:]' '[:upper:]')" && from="$(printf '%d' "'$from")"
+[[ -n "$to"      ]] && to="$(echo $to | tr '[:lower:]' '[:upper:]')"     && to="$(printf '%d' "'$to")"
 
 
 # http://slacy.com/blog/2010/02/using-cookies-sqlite-in-wget-or-curl/
@@ -157,6 +127,8 @@ EOF
 
 
 if [ "$update" == "true" ] || [ ! -e "$xmlfile" ]; then
+   [[ "$verbose" == "true" ]] && echo "CreateSiteMap: verbose: download SiteMap-XML-File"
+
    if [ -n "$cookies" ]; then
       # Use Cookie from Browser
       [[ "$cookies" == "firefox" ]] && ffpath="$(grep -Fe 'Path=' "$HOME/.mozilla/firefox/profiles.ini" | head -n 1)" && cookies="$HOME/.mozilla/firefox/${ffpath:5}/cookies.sqlite"
@@ -186,6 +158,7 @@ echo -n "" > "$gvfile-edges"
 
 
 ##---------------------------Create GraphViz Edges---------------------------------##
+[[ "$verbose" == "true" ]] && echo "CreateSiteMap: verbose: parse graph from SiteMap-XML-File"
 tmpdepth=$depth
 depth=1
 for l in `echo -e "1\n2"`; do
@@ -199,6 +172,8 @@ for l in `echo -e "1\n2"`; do
       href="${baseurl:0:-1}"
 
       for node in $(echo ${address:((${#baseurl}+5)):-6} | awk 'BEGIN{RS="/"}{print}'); do
+         [[ -n "$exclude" ]] && echo "$exclude" | grep -qFe ",$node," && break
+
          href="$href/$node"
          if ! grep -qFe "   \"$node\" [href=\"$href\"]" "$gvfile-nodes"; then
             echo "   \"$node\" [href=\"$href\"]" >>  "$gvfile-nodes"
@@ -235,6 +210,7 @@ done
 
 
 ##---------------------------Convert HTML Special Characters-----------------------##
+[[ "$verbose" == "true" ]] && echo "CreateSiteMap: verbose: rework graph"
 sed -i \
    -e 's/%C3%84/Ä/g' -e 's/%C3%A4/ä/g' -e 's/%C3%BC/ü/g' -e 's/%C3%9F/ß/g' \
    -e 's/%C3%96/Ö/g' -e 's/%C3%B6/ö/g' -e 's/%C3%9C/Ü/g' \
@@ -266,7 +242,9 @@ rm "$gvfile-nodes" "$gvfile-edges"
 
 
 ##---------------------------Build Graph Image-------------------------------------##
-fdp   -Tsvg "-Gratio=$fdpratio" -o "$fdpfile"   "$gvfile"
-dot   -Tsvg -o "$dotfile"   "$gvfile"
-twopi -Tsvg -Granksep=8 -o "$twopifile" "$gvfile"
+[[ "$verbose" == "true" ]] && echo "CreateSiteMap: verbose: create visual graphs"
+fdp   -Tsvg -o "$fdpfile"   "$gvfile" "-Gratio=$fdpratio"
+dot   -Tsvg -o "$dotfile"   "$gvfile" -Grankdir=LR
+twopi -Tsvg -o "$twopifile" "$gvfile" -Granksep=8
 
+#rm -f "$gvfile"
