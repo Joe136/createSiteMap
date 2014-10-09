@@ -4,7 +4,7 @@
 
 unset USERNAME PASSWORD arg_rest cookies
 unset wikiname urlname baseurl xmlfile gvfile fdpfile dotfile twopifile depth from to
-unset fdpratio color exclude verbose
+unset fdpratio color exclude excludesub verbose
 
 #wikiname=""
 #baseurl=""
@@ -33,7 +33,8 @@ until test "$((i > -BASH_ARGC))" == "0"; do
       case "$curr_arg" in
       --baseurl)      i=$((i - 1)); baseurl="${BASH_ARGV[$i]}" ;;
       --depth)        i=$((i - 1)); depth="${BASH_ARGV[$i]}" ;;
-      --exclude)      i=$((i - 1)); exclude="${BASH_ARGV[$i]}" ;;
+      --exclude)      i=$((i - 1)); exclude="$exclude,${BASH_ARGV[$i]}" ;;
+      --excludesub)   i=$((i - 1)); excludesub="$excludesub,${BASH_ARGV[$i]}" ;;
       --fdpratio)     i=$((i - 1)); fdpratio="${BASH_ARGV[$i]}" ;;
       --from)         i=$((i - 1)); from="${BASH_ARGV[$i]}" ;;
       --load-cookies) i=$((i - 1)); cookies="${BASH_ARGV[$i]}" ;;
@@ -44,23 +45,24 @@ until test "$((i > -BASH_ARGC))" == "0"; do
       --wikiname)     i=$((i - 1)); wikiname="${BASH_ARGV[$i]}" ;;
       --xmlfile)      i=$((i - 1)); xmlfile="${BASH_ARGV[$i]}" ;;
       --help)
-         echo "CreateSiteMap V0.1.3"
+         echo "CreateSiteMap V0.1.4"
          echo "Create visual (site)maps from MoinMoin-Wiki."
          echo ""
          echo "Options:"
-         echo "   --help                 Show this help"
-         echo "   --verbose              Print more info"
-         echo "   --update               Update SiteMap-XML-File from Wiki (only public sites)"
-         echo "   --load-cookies <file>  Define a Cookies-File to download form Wiki (see wget)"
-         echo "   --load-cookies firefox Use Wiki-Login from Firefox"
-         echo "   --wikiname <name>      The name of the Wiki"
-         echo "   --urlname <name>       The postfix of the URL"
-         echo "   --exclude <site>,...   Sites to exclude from creation"
-         echo "   --depth <number>       Max page-depth"
-         echo "   --from <char>          Only sites from this character"
-         echo "   --to <char>            Only sites till this character"
-         echo "   --fdpratio <number>    Image ratio for fdp sitemap"
-         echo "   --xmlfile <file>       Use this file as SiteMap-XML-File"
+         echo "   --help                  Show this help"
+         echo "   --verbose               Print more info"
+         echo "   --update                Update SiteMap-XML-File from Wiki (only public sites)"
+         echo "   --load-cookies <file>   Define a Cookies-File to download form Wiki (see wget)"
+         echo "   --load-cookies firefox  Use Wiki-Login from Firefox"
+         echo "   --wikiname <name>       The name of the Wiki"
+         echo "   --urlname <name>        The postfix of the URL"
+         echo "   --exclude <site>,...    Sites to exclude from creation"
+         echo "   --excludesub <site>,... Sites to exclude the subpages from creation"
+         echo "   --depth <number>        Max page-depth"
+         echo "   --from <char>           Only sites from this character"
+         echo "   --to <char>             Only sites till this character"
+         echo "   --fdpratio <number>     Image ratio for fdp sitemap"
+         echo "   --xmlfile <file>        Use this file as SiteMap-XML-File"
          exit 0
       ;;
       esac
@@ -93,12 +95,14 @@ done
 : ${dotfile:="$wikiname""_wiki.dot.svg"}
 : ${twopifile:="$wikiname""_wiki.twopi.svg"}
 
-[[ -z "$setun"   ]] && urlname="$wikiname"
-[[ -n "$exclude" ]] && exclude=",$exclude,"
-[[ -n "$from"    ]] && from="$(echo $from | tr '[:lower:]' '[:upper:]')" && from="$(printf '%d' "'$from")"
-[[ -n "$to"      ]] && to="$(echo $to | tr '[:lower:]' '[:upper:]')"     && to="$(printf '%d' "'$to")"
+[[ -z "$setun"      ]] && urlname="$wikiname"
+[[ -n "$exclude"    ]] && exclude=",$exclude,"
+[[ -n "$excludesub" ]] && excludesub=",$excludesub,"
+[[ -n "$from"       ]] && from="$(echo $from | tr '[:lower:]' '[:upper:]')" && from="$(printf '%d' "'$from")"
+[[ -n "$to"         ]] && to="$(echo $to | tr '[:lower:]' '[:upper:]')"     && to="$(printf '%d' "'$to")"
 
 
+##---------------------------Download Sitemap from page----------------------------##
 # http://slacy.com/blog/2010/02/using-cookies-sqlite-in-wget-or-curl/
 # This is the format of the sqlite database:
 # CREATE TABLE moz_cookies (id INTEGER PRIMARY KEY, name TEXT, value TEXT, host TEXT, path TEXT,expiry INTEGER, lastAccessed INTEGER, isSecure INTEGER, isHttpOnly INTEGER);
@@ -145,7 +149,7 @@ fi
 
 
 ##---------------------------Get links from XML-Sitemap-File-----------------------##
-list=$(grep --color -oEe "<loc>$baseurl$urlname/[[:print:]]+</loc>" "$xmlfile")
+addresslist=$(grep --color -oEe "<loc>$baseurl$urlname/[[:print:]]+</loc>" "$xmlfile")
 
 echo -n "" > "$gvfile"
 echo -n "" > "$gvfile-nodes"
@@ -161,7 +165,7 @@ if [ "${baseurl:((${#baseurl}-1))}" == "/" ]; then basehref="${baseurl:0:-1}"; e
 for l in `echo -e "1\n2"`; do
    ((l == 2)) && depth=$tmpdepth
 
-   for address in $list; do
+   for address in $addresslist; do
       #echo ${address:34:-6} | sed 's/\//\" -> \"/g' | echo "   \""`cat -`\" >> "$gvfile"
 
       i=0
@@ -172,9 +176,16 @@ for l in `echo -e "1\n2"`; do
 
       for node in $nodelist; do
          [[ -n "$exclude" ]] && echo "$exclude" | grep -qFe ",$node," && break
+         [[ -n "$excludesub" ]] && ((i > 1)) && echo "$excludesub" | grep -qFe ",$oldnode," && break
 
          if [ -z "$urlname" ] && ((i == 0)) && [ "$node" == "$wikiname" ]; then :; else href="$href/$node"; fi
          if ! grep -qFe "   \"$node\" [href=\"$href\"]" "$gvfile-nodes"; then
+            if ((i == 1)); then
+               c="$(echo ${node:0:1} | tr '[:lower:]' '[:upper:]')"
+               c="$(printf '%d' "'$c")"
+               ( [[ -n "$from" ]] && ((c < from)) ) && break
+               ( [[ -n "$to"   ]] && ((c > to)) ) && break
+            fi
             echo "   \"$node\" [href=\"$href\"]" >>  "$gvfile-nodes"
          fi
 
