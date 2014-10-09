@@ -2,7 +2,8 @@
 # See the file "license.terms" for information on usage and redistribution of
 # this file, and for a DISCLAIMER OF ALL WARRANTIES.
 
-unset USERNAME PASSWORD arg_rest
+unset USERNAME PASSWORD arg_rest cookies
+unset wikiname baseurl xmlfile gvfile fdpfile dotfile twopifile depth from to fdpratio color
 
 #wikiname=""
 #baseurl=""
@@ -27,7 +28,6 @@ color[4]="yellow"
 color[5]="violet"
 
 
-
 ##---------------------------Check Arguments---------------------------------------##
 i=0
 arg_rest_count=0
@@ -36,7 +36,7 @@ until test "$((i > -BASH_ARGC))" == "0"; do
    i=$((i - 1))
    curr_arg="${BASH_ARGV[$i]}"
 
-   if [ "$(echo "$curr_arg" | head -c 2)" == "--" ]; then
+   if [ "${curr_arg:0:2}" == "--" ]; then
       case "$curr_arg" in
       ##---------------------wikiname----------------------------------------------##
       --wikiname)
@@ -67,19 +67,32 @@ until test "$((i > -BASH_ARGC))" == "0"; do
       --update)
          update=true
       ;;
+      ##---------------------load-cookies------------------------------------------##
+      --load-cookies)
+         i=$((i - 1))
+         cookies="${BASH_ARGV[$i]}"
+      ;;
+      ##---------------------xmlfile-----------------------------------------------##
+      --xmlfile)
+         i=$((i - 1))
+         xmlfile="${BASH_ARGV[$i]}"
+      ;;
       ##---------------------help--------------------------------------------------##
       --help)
-         echo "createSiteMap V0.1.0"
+         echo "createSiteMap V0.1.1"
          echo "Create visual (site)maps from MoinMoin-Wiki."
          echo ""
          echo "Options:"
-         echo "   --help               Show this help"
-         echo "   --update             Update SiteMap-XML-File from Wiki (only public sites)"
-         echo "   --wikiname <name>    The name of the Wiki"
-         echo "   --depth <number>     Max page-depth"
-         echo "   --from <char>        Only sites from this character"
-         echo "   --to <char>          Only sites till this character"
-         echo "   --fdpratio <number>  Image ratio for fdp sitemap"
+         echo "   --help                 Show this help"
+         echo "   --update               Update SiteMap-XML-File from Wiki (only public sites)"
+         echo "   --load-cookies <file>  Define a Cookies-File to download form Wiki (see wget)"
+         echo "   --load-cookies firefox Use Wiki-Login from Firefox"
+         echo "   --wikiname <name>      The name of the Wiki"
+         echo "   --depth <number>       Max page-depth"
+         echo "   --from <char>          Only sites from this character"
+         echo "   --to <char>            Only sites till this character"
+         echo "   --fdpratio <number>    Image ratio for fdp sitemap"
+         echo "   --xmlfile <file>       Use this file as SiteMap-XML-File"
          exit 0
       ;;
       esac
@@ -109,23 +122,58 @@ done
 
 [[ -z "$wikiname" ]] && echo "error: no name defined" 1>&2 && exit 1
 
-xmlfile="$wikiname.xml"
-gvfile="$wikiname""_wiki.gv"
-fdpfile="$wikiname""_wiki.fdp.svg"
-dotfile="$wikiname""_wiki.dot.svg"
-twopifile="$wikiname""_wiki.twopi.svg"
+
+##---------------------------Set undefined values----------------------------------##
+: ${xmlfile:="$wikiname.xml"}
+: ${gvfile:="$wikiname""_wiki.gv"}
+: ${fdpfile:="$wikiname""_wiki.fdp.svg"}
+: ${dotfile:="$wikiname""_wiki.dot.svg"}
+: ${twopifile:="$wikiname""_wiki.twopi.svg"}
 
 [[ -n "$from" ]] && from="$(echo $from | tr '[:lower:]' '[:upper:]')" && from="$(printf '%d' "'$from")"
 [[ -n "$to"   ]] && to="$(echo $to | tr '[:lower:]' '[:upper:]')"     && to="$(printf '%d' "'$to")"
 
 
-if [ "$update" == "true" ] || [ ! -e "$xmlfile" ]; then
-   #read -p 'Benutzer eingeben: ' USERNAME
-   #echo ""
+# http://slacy.com/blog/2010/02/using-cookies-sqlite-in-wget-or-curl/
+# This is the format of the sqlite database:
+# CREATE TABLE moz_cookies (id INTEGER PRIMARY KEY, name TEXT, value TEXT, host TEXT, path TEXT,expiry INTEGER, lastAccessed INTEGER, isSecure INTEGER, isHttpOnly INTEGER);
 
-   #wget "--user=$USERNAME" --ask-password "$baseurl$wikiname/?action=sitemap&underlay=0" -O "$xmlfile"
-   #Only Public
-   wget "$baseurl$wikiname/?action=sitemap&underlay=0" -O "$xmlfile"
+# We have to copy cookies.sqlite, because FireFox has a lock on it
+function extract_cookies_from_sqlite {
+   cat "$1" > cookie-tmp.sqlite
+   [[ -e "$1"-shm ]] && cat "$1"-shm > cookie-tmp.sqlite-shm
+   [[ -e "$1"-wal ]] && cat "$1"-wal > cookie-tmp.sqlite-wal
+   sqlite3 -separator ' ' cookie-tmp.sqlite << EOF
+.mode tabs
+.header off
+select host,
+case substr(host,1,1)='.' when 0 then 'FALSE' else 'TRUE' end, path,
+case isSecure when 0 then 'FALSE' else 'TRUE' end, expiry, name, value from moz_cookies;
+EOF
+   rm -f cookie-tmp.sqlite
+   rm -f cookie-tmp.sqlite-shm
+   rm -f cookie-tmp.sqlite-wal
+}
+
+
+if [ "$update" == "true" ] || [ ! -e "$xmlfile" ]; then
+   if [ -n "$cookies" ]; then
+      # Use Cookie from Browser
+      [[ "$cookies" == "firefox" ]] && ffpath="$(grep -Fe 'Path=' "$HOME/.mozilla/firefox/profiles.ini" | head -n 1)" && cookies="$HOME/.mozilla/firefox/${ffpath:5}/cookies.sqlite"
+
+      # Use Cookie from Firefox-SQLite
+      if [ "${cookies:((${#cookies}-7))}" == ".sqlite" ]; then
+         extract_cookies_from_sqlite "$cookies" > cookie-tmp.txt
+         cookies=cookie-tmp.txt
+      fi
+
+      wget --load-cookies "$cookies" "$baseurl$wikiname/?action=sitemap&underlay=0" -O "$xmlfile"
+
+      [ -e cookie-tmp.txt ] && rm -f cookie-tmp.txt
+   else
+      #Only Public
+      wget "$baseurl$wikiname/?action=sitemap&underlay=0" -O "$xmlfile"
+   fi
 fi
 
 
@@ -221,3 +269,4 @@ rm "$gvfile-nodes" "$gvfile-edges"
 fdp   -Tsvg "-Gratio=$fdpratio" -o "$fdpfile"   "$gvfile"
 dot   -Tsvg -o "$dotfile"   "$gvfile"
 twopi -Tsvg -Granksep=8 -o "$twopifile" "$gvfile"
+
