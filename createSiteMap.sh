@@ -4,7 +4,7 @@
 
 unset USERNAME PASSWORD arg_rest cookies
 unset wikiname urlname baseurl xmlfile gvfile fdpfile dotfile twopifile depth from to
-unset fdpratio color exclude excludesub verbose
+unset fdpratio color exclude excludesub verbose unique update
 
 #wikiname=""
 #baseurl=""
@@ -39,13 +39,14 @@ until test "$((i > -BASH_ARGC))" == "0"; do
       --from)         i=$((i - 1)); from="${BASH_ARGV[$i]}" ;;
       --load-cookies) i=$((i - 1)); cookies="${BASH_ARGV[$i]}" ;;
       --to)           i=$((i - 1)); to="${BASH_ARGV[$i]}" ;;
+      --unique)       unique=true ;;
       --update)       update=true ;;
       --urlname)      i=$((i - 1)); urlname="${BASH_ARGV[$i]}"; setun=true ;;
       --verbose)      verbose=true ;;
       --wikiname)     i=$((i - 1)); wikiname="${BASH_ARGV[$i]}" ;;
       --xmlfile)      i=$((i - 1)); xmlfile="${BASH_ARGV[$i]}" ;;
       --help)
-         echo "CreateSiteMap V0.1.4"
+         echo "CreateSiteMap V0.1.5"
          echo "Create visual (site)maps from MoinMoin-Wiki."
          echo ""
          echo "Options:"
@@ -58,6 +59,7 @@ until test "$((i > -BASH_ARGC))" == "0"; do
          echo "   --urlname <name>        The postfix of the URL"
          echo "   --exclude <site>,...    Sites to exclude from creation"
          echo "   --excludesub <site>,... Sites to exclude the subpages from creation"
+         echo "   --unique                Prevent collisions of identical page names"
          echo "   --depth <number>        Max page-depth"
          echo "   --from <char>           Only sites from this character"
          echo "   --to <char>             Only sites till this character"
@@ -170,29 +172,35 @@ for l in `echo -e "1\n2"`; do
 
       i=0
       oldnode=""
+      label=""
+      oldlabel=""
+      uniquenode=""
       href="$basehref"
       nodelist="$(echo ${address:((${#baseurl}+5)):-6} | awk 'BEGIN{RS="/"}{print}')"
       [[ -z "$urlname" ]] && nodelist="$wikiname $nodelist"
 
       for node in $nodelist; do
          [[ -n "$exclude" ]] && echo "$exclude" | grep -qFe ",$node," && break
-         [[ -n "$excludesub" ]] && ((i > 1)) && echo "$excludesub" | grep -qFe ",$oldnode," && break
+         [[ -n "$excludesub" ]] && ((i > 1)) && echo "$excludesub" | grep -qFe ",$oldlabel," && break
+         label="$node"
 
-         if [ -z "$urlname" ] && ((i == 0)) && [ "$node" == "$wikiname" ]; then :; else href="$href/$node"; fi
-         if ! grep -qFe "   \"$node\" [href=\"$href\"]" "$gvfile-nodes"; then
+         if [ -z "$urlname" ] && ((i == 0)) && [ "$label" == "$wikiname" ]; then :; else href="$href/$label"; fi
+         nodeentry="   \"$label\" [href=\"$href\"]"
+         [[ -n "$unique" ]] && uniquenode="$uniquenode""_$label" && nodeentry="   \"$uniquenode\" [label=\"$label\",href=\"$href\"]" && node="$uniquenode"
+         if ! grep -qFe "$nodeentry" "$gvfile-nodes"; then
             if ((i == 1)); then
-               c="$(echo ${node:0:1} | tr '[:lower:]' '[:upper:]')"
+               c="$(echo ${label:0:1} | tr '[:lower:]' '[:upper:]')"
                c="$(printf '%d' "'$c")"
                ( [[ -n "$from" ]] && ((c < from)) ) && break
                ( [[ -n "$to"   ]] && ((c > to)) ) && break
             fi
-            echo "   \"$node\" [href=\"$href\"]" >>  "$gvfile-nodes"
+            echo "$nodeentry" >>  "$gvfile-nodes"
          fi
 
          if ((i == 0)); then
             :
          elif ((i == 1)); then
-            c="$(echo ${node:0:1} | tr '[:lower:]' '[:upper:]')"
+            c="$(echo ${label:0:1} | tr '[:lower:]' '[:upper:]')"
             c="$(printf '%d' "'$c")"
             ( [[ -n "$from" ]] && ((c < from)) ) && break
             ( [[ -n "$to"   ]] && ((c > to)) ) && break
@@ -211,6 +219,7 @@ for l in `echo -e "1\n2"`; do
          fi
 
          oldnode="$node"
+         oldlabel="$label"
          ((++i))
 
          ((depth != 0)) && ((i > depth)) && break
@@ -235,6 +244,7 @@ sed -i \
 
 
 ##---------------------------Concatenate GraphViz File-----------------------------##
+[[ -n "$unique" ]] && wikiname="_$wikiname"
 echo -e 'digraph "'"$(basename -s ".gv" "$gvfile")"'" {'"\n"\
 '   graph [mindist=0.01,nodesep=0.01,ranksep=5,root="'$wikiname'"]'"\n"\
 '   edge [color="'${color[1]}'"]'"\n"\
