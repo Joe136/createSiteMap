@@ -3,22 +3,13 @@
 # this file, and for a DISCLAIMER OF ALL WARRANTIES.
 
 unset USERNAME PASSWORD arg_rest cookies
-unset wikiname baseurl xmlfile gvfile fdpfile dotfile twopifile depth from to fdpratio color
-unset exclude verbose
+unset wikiname urlname baseurl xmlfile gvfile fdpfile dotfile twopifile depth from to
+unset fdpratio color exclude verbose
 
 #wikiname=""
 #baseurl=""
 
-#xmlfile="$wikiname.xml"
-#gvfile="$wikiname""_wiki.gv"
-#fdpfile="$wikiname""_wiki.fdp.svg"
-#dotfile="$wikiname""_wiki.dot.svg"
-#twopifile="$wikiname""_wiki.twopi.svg"
-
-#exclude=
 depth=0
-#from=
-#to=
 
 fdpratio=0.75
 #fdpratio=0.562
@@ -40,6 +31,7 @@ until test "$((i > -BASH_ARGC))" == "0"; do
 
    if [ "${curr_arg:0:2}" == "--" ]; then
       case "$curr_arg" in
+      --baseurl)      i=$((i - 1)); baseurl="${BASH_ARGV[$i]}" ;;
       --depth)        i=$((i - 1)); depth="${BASH_ARGV[$i]}" ;;
       --exclude)      i=$((i - 1)); exclude="${BASH_ARGV[$i]}" ;;
       --fdpratio)     i=$((i - 1)); fdpratio="${BASH_ARGV[$i]}" ;;
@@ -47,11 +39,12 @@ until test "$((i > -BASH_ARGC))" == "0"; do
       --load-cookies) i=$((i - 1)); cookies="${BASH_ARGV[$i]}" ;;
       --to)           i=$((i - 1)); to="${BASH_ARGV[$i]}" ;;
       --update)       update=true ;;
+      --urlname)      i=$((i - 1)); urlname="${BASH_ARGV[$i]}"; setun=true ;;
       --verbose)      verbose=true ;;
       --wikiname)     i=$((i - 1)); wikiname="${BASH_ARGV[$i]}" ;;
       --xmlfile)      i=$((i - 1)); xmlfile="${BASH_ARGV[$i]}" ;;
       --help)
-         echo "CreateSiteMap V0.1.2"
+         echo "CreateSiteMap V0.1.3"
          echo "Create visual (site)maps from MoinMoin-Wiki."
          echo ""
          echo "Options:"
@@ -61,6 +54,7 @@ until test "$((i > -BASH_ARGC))" == "0"; do
          echo "   --load-cookies <file>  Define a Cookies-File to download form Wiki (see wget)"
          echo "   --load-cookies firefox Use Wiki-Login from Firefox"
          echo "   --wikiname <name>      The name of the Wiki"
+         echo "   --urlname <name>       The postfix of the URL"
          echo "   --exclude <site>,...   Sites to exclude from creation"
          echo "   --depth <number>       Max page-depth"
          echo "   --from <char>          Only sites from this character"
@@ -99,6 +93,7 @@ done
 : ${dotfile:="$wikiname""_wiki.dot.svg"}
 : ${twopifile:="$wikiname""_wiki.twopi.svg"}
 
+[[ -z "$setun"   ]] && urlname="$wikiname"
 [[ -n "$exclude" ]] && exclude=",$exclude,"
 [[ -n "$from"    ]] && from="$(echo $from | tr '[:lower:]' '[:upper:]')" && from="$(printf '%d' "'$from")"
 [[ -n "$to"      ]] && to="$(echo $to | tr '[:lower:]' '[:upper:]')"     && to="$(printf '%d' "'$to")"
@@ -139,18 +134,18 @@ if [ "$update" == "true" ] || [ ! -e "$xmlfile" ]; then
          cookies=cookie-tmp.txt
       fi
 
-      wget --load-cookies "$cookies" "$baseurl$wikiname/?action=sitemap&underlay=0" -O "$xmlfile"
+      wget --load-cookies "$cookies" "$baseurl$urlname/?action=sitemap&underlay=0" -O "$xmlfile"
 
       [ -e cookie-tmp.txt ] && rm -f cookie-tmp.txt
    else
       #Only Public
-      wget "$baseurl$wikiname/?action=sitemap&underlay=0" -O "$xmlfile"
+      wget "$baseurl$urlname/?action=sitemap&underlay=0" -O "$xmlfile"
    fi
 fi
 
 
 ##---------------------------Get links from XML-Sitemap-File-----------------------##
-list=$(grep --color -oEe "<loc>$baseurl$wikiname/[[:print:]]+</loc>" "$xmlfile")
+list=$(grep --color -oEe "<loc>$baseurl$urlname/[[:print:]]+</loc>" "$xmlfile")
 
 echo -n "" > "$gvfile"
 echo -n "" > "$gvfile-nodes"
@@ -161,6 +156,8 @@ echo -n "" > "$gvfile-edges"
 [[ "$verbose" == "true" ]] && echo "CreateSiteMap: verbose: parse graph from SiteMap-XML-File"
 tmpdepth=$depth
 depth=1
+if [ "${baseurl:((${#baseurl}-1))}" == "/" ]; then basehref="${baseurl:0:-1}"; else basehref="$baseurl"; fi
+
 for l in `echo -e "1\n2"`; do
    ((l == 2)) && depth=$tmpdepth
 
@@ -169,12 +166,14 @@ for l in `echo -e "1\n2"`; do
 
       i=0
       oldnode=""
-      href="${baseurl:0:-1}"
+      href="$basehref"
+      nodelist="$(echo ${address:((${#baseurl}+5)):-6} | awk 'BEGIN{RS="/"}{print}')"
+      [[ -z "$urlname" ]] && nodelist="$wikiname $nodelist"
 
-      for node in $(echo ${address:((${#baseurl}+5)):-6} | awk 'BEGIN{RS="/"}{print}'); do
+      for node in $nodelist; do
          [[ -n "$exclude" ]] && echo "$exclude" | grep -qFe ",$node," && break
 
-         href="$href/$node"
+         if [ -z "$urlname" ] && ((i == 0)) && [ "$node" == "$wikiname" ]; then :; else href="$href/$node"; fi
          if ! grep -qFe "   \"$node\" [href=\"$href\"]" "$gvfile-nodes"; then
             echo "   \"$node\" [href=\"$href\"]" >>  "$gvfile-nodes"
          fi
@@ -248,3 +247,4 @@ dot   -Tsvg -o "$dotfile"   "$gvfile" -Grankdir=LR
 twopi -Tsvg -o "$twopifile" "$gvfile" -Granksep=8
 
 #rm -f "$gvfile"
+
